@@ -8,6 +8,8 @@ import networkx as nx
 from datetime import datetime
 import os
 
+plt.style.use('ggplot')
+
 seed_time = datetime.now()
 seed = seed_time.strftime("%Y%m%d_%H%M%S")
 rng = np.random.default_rng(seed=int(seed))
@@ -405,9 +407,8 @@ class GCRM:
 
 
         if update:
-            end_result = all_y[:, -1]
-            self.communities[0].species = end_result[:self.n_players]
-            self.communities[0].resources = end_result[self.n_players:]
+            end_result = all_y[:self.n_players, -1]
+            return end_result
         if report:
             self.create_report(sol.y, run_id)
         if plot:
@@ -419,6 +420,63 @@ class GCRM:
             self.plot_generation(plotobject, savefigs, run_id)
             self.plot_graph(np.where(all_y[:self.n_players, -1] > self.cutoffvalue)[0], run_id)  # checks only the 1st
 
+    def standardize_plot(self, ax, xlabel, ylabel, xticklabels):
+        ax.set_xlabel(xlabel, fontsize=14, weight='bold')
+        ax.set_ylabel(ylabel, fontsize=14, weight='bold')
+        ax.set_xticks(range(len(xticklabels)))
+        ax.set_xticklabels(xticklabels, fontsize=12, rotation=45)
+        ax.tick_params(axis='both', which='major', labelsize=12)
+        plt.tight_layout()
+    def sample_metacom(self, n, run_id, t_end=1000):
+        """
+        Initialise a community from the same metacommunity n times. Call self.grow(), plot family-level end results
+        :param n: Number of repeats
+        :return:
+        """
+        total_abundance_matrix = np.zeros((n, self.n_families))
+        all_results = []
+        all_labels = []
+        for i in range(n):
+            results = self.grow_ivp(update=True, plot=False, t_end=t_end, resolution=0.1, run_id=run_id)
+            all_results.append(results[results != 0])
+            all_labels.append(foo.players[results != 0])
+            present_families = np.unique(self.family_ids[self.players])
+            for fam in present_families:
+                total_abundance_matrix[i][int(fam)] = results[self.family_ids[self.players] == fam].sum()
+
+        total_abundance_matrix = np.array(total_abundance_matrix)
+
+        x_locations = np.arange(n)
+        bottoms = np.zeros(n)
+
+        # Family-level distribution
+        fig, ax = plt.subplots(figsize=(16, 9))
+        for i in range(total_abundance_matrix.shape[1]):
+            ax.bar(x_locations, total_abundance_matrix[:, i], width=0.5, bottom=bottoms)
+            bottoms += total_abundance_matrix[:, i]
+
+        self.standardize_plot(ax, "Communities", "Absolute family abundance", [f"Sample {i + 1}" for i in range(n)])
+        plt.legend()
+
+        plt.savefig(f'{self.results_path}/sample_{n}_times_fam.png')
+        plt.close()
+
+        # Species-level distribution
+        fig, ax = plt.subplots(figsize=(16, 9))
+        unique_labels = np.unique([label for sublist in all_labels for label in sublist])
+        colors = plt.cm.twilight(np.linspace(0, 1, len(unique_labels)))  # Generate colors
+        label_to_color = dict(zip(unique_labels, colors))  # Map labels to colors
+
+        for i, (data, labels) in enumerate(zip(all_results, all_labels)):
+            bottom = 0
+            for value, label in zip(data, labels):
+                ax.bar(i, value, bottom=bottom, width=0.5, color=label_to_color[label])
+                bottom += value
+
+        self.standardize_plot(ax, "Communities", "Absolute species abundance", [f"Sample {i + 1}" for i in range(n)])
+        plt.savefig(f'{self.results_path}/sample_{n}_times_spec.png')
+        plt.close()
+        #plt.show()
     def create_report(self, sol, run_id):
         species_names = []
         for i in range(self.n_players):
@@ -642,7 +700,7 @@ class GCRM:
         np.savetxt(f'{self.results_path}/{run_id}_end_results.csv', sol_s[:, -1], delimiter=',', fmt='%s')
 
 
-foo = GCRM(n_species=10, n_resources=10, spec=0.5, spec_var=0.05, n_families=10,
+foo = GCRM(n_species=50, n_resources=10, spec=0.5, spec_var=0.05, n_families=10,
            results_path=folder_name, dcase=None, mcase=None, cutoffvalue=0.0001,
            m_val=0.1, invade=False, t_invaders=25, first_invasion=25, n_invaders=0, h=1)
 
@@ -651,15 +709,16 @@ survived = []
 
 current_time = datetime.now()
 run_id = current_time.strftime("%Y%m%d_%H%M%S")
-foo.grow_ivp(run_id=run_id, plot=True, savefigs=True, t_end=2500, resolution=0.5, report=False)
 #fams.append(foo.get_invader_families())
 #survived.append(foo.get_survivor_families())
 
-for i in range(10):
-    print(f"Run {i}")
-    current_time = datetime.now()
-    run_id = current_time.strftime("%Y%m%d_%H%M%S")
-    foo.grow_ivp(run_id=run_id, plot=True, savefigs=True, t_end=2500, resolution=0.5, repeat=True, report=False)
+foo.sample_metacom(10, run_id=run_id, t_end=1500)
+
+# for i in range(10):
+#     print(f"Run {i}")
+#     current_time = datetime.now()
+#     run_id = current_time.strftime("%Y%m%d_%H%M%S")
+#     foo.grow_ivp(run_id=run_id, plot=True, savefigs=True, t_end=2500, resolution=0.5, repeat=True, report=False)
     #fams.append(foo.get_invader_families())
     #survived.append(foo.get_survivor_families())
 
